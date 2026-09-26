@@ -1,0 +1,31 @@
+FROM python:3.11-slim-bullseye
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV LANG=C.UTF-8
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        ca-certificates \
+        curl \
+        file \
+        git \
+        libfuse2 \
+        patchelf \
+        python3-tk \
+        squashfs-tools \
+        wget \
+        zstd \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN wget -q -O /tmp/appimagetool \
+        https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage \
+    && chmod +x /tmp/appimagetool \
+    && /tmp/appimagetool --appimage-extract \
+    && mv squashfs-root /opt/appimagetool \
+    && rm /tmp/appimagetool
+
+RUN ln -s /opt/appimagetool/usr/bin/appimagetool /usr/local/bin/appimagetool
+
+WORKDIR /src
