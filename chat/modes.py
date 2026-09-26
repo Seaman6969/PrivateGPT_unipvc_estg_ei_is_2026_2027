@@ -1,0 +1,5 @@
+TOKENLESS = "tokenless"
+DEEPTHINK = "deepthink"
+
+ALL = (TOKENLESS, DEEPTHINK)
+DEFAULT = DEEPTHINK
