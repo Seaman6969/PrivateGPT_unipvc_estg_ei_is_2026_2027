@@ -1,1 +1,31 @@
+from .vault import (
+    change_password,
+    decrypt_text,
+    encrypt_text,
+    ensure_vault_dir,
+    get_active_cipher,
+    is_unlocked,
+    is_vault_initialized,
+    lock_vault,
+    set_vault_dir,
+    setup_vault,
+    unlock_vault,
+    VAULT_DIR,
+    VAULT_FILE,
+)
 
+__all__ = [
+    "change_password",
+    "decrypt_text",
+    "encrypt_text",
+    "ensure_vault_dir",
+    "get_active_cipher",
+    "is_unlocked",
+    "is_vault_initialized",
+    "lock_vault",
+    "set_vault_dir",
+    "setup_vault",
+    "unlock_vault",
+    "VAULT_DIR",
+    "VAULT_FILE",
+]
