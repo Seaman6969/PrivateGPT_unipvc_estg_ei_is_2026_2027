@@ -12,8 +12,11 @@ PREFERRED_CHAT_MODELS: tuple[str, ...] = (
     "llama3.1", "llama3.2", "llama3", "mistral", "qwen2.5", "deepseek-r1",
 )
 
+REQUIRED_CHAT_MODEL: str = "deepseek-r1:7b"
+REQUIRED_EMBED_MODEL: str = "nomic-embed-text"
+
 SYSTEM_PROMPT: str = (
-    "You are PrivateGPT, a secure and intelligent local assistant specialized in procurement, data analysis, "
+    "You are LocalGPT, an intelligent local assistant specialized in procurement, data analysis, "
     "and contract evaluation, equipped with long-term memory and access to a verified local knowledge base.\n\n"
     "Guidelines:\n"
     "1. When reference material from the knowledge base or past conversation memory is provided, "
@@ -25,6 +28,19 @@ SYSTEM_PROMPT: str = (
     "and reason based on general knowledge without inventing facts."
 )
 
+def ensure_models(port: int, on_status=None) -> Error | None:
+    for model in (REQUIRED_CHAT_MODEL, REQUIRED_EMBED_MODEL):
+        present = client.has_model(port=port, model=model)
+        if isinstance(present, Error):
+            return present
+        if present:
+            continue
+        if on_status:
+            on_status(f"Downloading {model}...")
+        result = client.pull(port=port, model=model, on_status=on_status)
+        if isinstance(result, Error):
+            return result
+    return None
 
 def detect_port() -> int | None:
     return ports.find_ollama()
@@ -52,6 +68,10 @@ def _is_embedding_helper(name: str) -> bool:
 
 
 def _preferred_or_first_helper(candidates: list[str]) -> str:
+    for name in candidates:
+        if name == REQUIRED_CHAT_MODEL:
+            return name
+        
     for preferred in PREFERRED_CHAT_MODELS:
         for name in candidates:
             if name.startswith(preferred):
@@ -62,7 +82,6 @@ def _preferred_or_first_helper(candidates: list[str]) -> str:
 def _contextual_query_helper(prompt: str, history: list[dict[str, str]] | None) -> str:
     if not history:
         return prompt
-    # Extract identifiers from recent history to enrich follow-up queries
     recent_messages = history[-4:]
     history_text = " ".join(m.get("content", "") for m in recent_messages if m.get("role") in ("user", "assistant"))
     tokens = re.findall(r"\b[A-Za-z0-9_-]{4,20}\b", history_text)
@@ -71,7 +90,6 @@ def _contextual_query_helper(prompt: str, history: list[dict[str, str]] | None) 
         if (any(c.isdigit() for c in t) and any(c.isalpha() for c in t)) or t.upper().startswith("PN")
     ]
     unique_ids = list(dict.fromkeys(identifiers))
-    # If the prompt doesn't already contain these identifiers, append them for search
     missing_ids = [code for code in unique_ids if code.lower() not in prompt.lower()]
     if missing_ids:
         return f"{prompt} {' '.join(missing_ids)}"
