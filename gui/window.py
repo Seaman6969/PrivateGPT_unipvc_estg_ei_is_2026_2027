@@ -10,10 +10,9 @@ from config import sessions
 from config.sessions import Session, SessionMeta
 from ollama import server
 from rag import build_index, index_session_memory, remove_session_memory
-import security
 from utils.errors import Error
 
-from . import chat_panel, greeter, lock_view, session_panel, widgets
+from . import chat_panel, greeter, session_panel, widgets
 
 DEFAULT_OLLAMA_PORT: int = 11434
 OLLAMA_BOOT_TIMEOUT_SECONDS: float = 30.0
@@ -26,9 +25,6 @@ class MainWindow:
         self.port: int | None = None
         self.model: str = ""
         self._container: tk.Frame | None = None
-        self._toolbar: tk.Frame | None = None
-        self._toolbar_actions: tk.Frame | None = None
-        self._lock_view: lock_view.LockView | None = None
         self._greeter: greeter.Greeter | None = None
         self._chat: chat_panel.ChatPanel | None = None
         self._sessions: session_panel.SessionPanel | None = None
@@ -43,16 +39,22 @@ class MainWindow:
         self._build_toolbar()
         self._build_container()
         self._boot_ollama()
-        self._detect()
-        if not security.is_unlocked():
-            self._show_lock()
-        else:
-            self._show_greeter()
+        self._show_greeter()
+        self._greeter.set_status("Preparing models...")
+        threading.Thread(target=self._ensure_models_worker, daemon=True).start()
         self.root.protocol("WM_DELETE_WINDOW", self._on_quit)
 
+    def _ensure_models_worker(self) -> None:
+        port = controller.detect_port()
+        err = controller.ensure_models(
+            port=port,
+            on_status=lambda s: self.root.after(0, self._set_greeter_status, s),
+        ) if port else Error(message="Ollama not running")
+        self.root.after(0, self._models_ready, err)
+    
     def _configure_root(self) -> None:
-        self.root.title("PrivateGPT")
-        self.root.geometry("920x680")
+        self.root.title("LocalGPT")
+        self.root.geometry("900x680")
         self.root.minsize(720, 560)
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(1, weight=1)
@@ -60,35 +62,10 @@ class MainWindow:
     def _build_toolbar(self) -> None:
         bar = widgets.make_frame(self.root, bg=widgets.WHITE)
         bar.grid(row=0, column=0, sticky="ew")
-        self._toolbar = bar
-        widgets.make_title(bar, "PrivateGPT").pack(side="left", padx=18, pady=12)
-        self._toolbar_actions = widgets.make_frame(bar, bg=widgets.WHITE)
-        self._toolbar_actions.pack(side="right")
-
-    def _update_toolbar(self, view: str) -> None:
-        if self._toolbar_actions is None:
-            return
-        for child in self._toolbar_actions.winfo_children():
-            child.destroy()
-
-        if view == "lock":
-            widgets.make_subtle(self._toolbar_actions, "Locked").pack(
-                side="right", padx=18, pady=12
-            )
-            return
-
-        # Unlocked toolbar options
-        widgets.make_small_button(self._toolbar_actions, "Lock", self._lock).pack(
-            side="right", padx=(6, 18), pady=12
+        widgets.make_title(bar, "LocalGPT").pack(side="left", padx=18, pady=12)
+        widgets.make_small_button(bar, "← Back", self._show_greeter).pack(
+            side="right", padx=18, pady=12,
         )
-        widgets.make_small_button(
-            self._toolbar_actions, "Change Password", self._change_password
-        ).pack(side="right", padx=(6, 0), pady=12)
-
-        if view == "chat":
-            widgets.make_small_button(
-                self._toolbar_actions, "← Back", self._show_greeter
-            ).pack(side="right", padx=(0, 6), pady=12)
 
     def _build_container(self) -> None:
         self._container = widgets.make_frame(self.root)
@@ -97,37 +74,23 @@ class MainWindow:
     def _boot_ollama(self) -> None:
         if server.is_running():
             return
-        self._ollama_proc = server.start(port=DEFAULT_OLLAMA_PORT)
+        try:
+            self._ollama_proc = server.start(port=DEFAULT_OLLAMA_PORT)
+        except OSError:
+            self._ollama_proc = None
+            messagebox.showerror(
+                "Ollama not found",
+                "Ollama is not installed. Install it from https://ollama.com and restart LocalGPT.",
+            )
+            return
         server.wait_until_ready(port=DEFAULT_OLLAMA_PORT, timeout=OLLAMA_BOOT_TIMEOUT_SECONDS)
-
+    
     def _detect(self) -> None:
         self.port = controller.detect_port()
         self.model = controller.default_model(self.port) if self.port else ""
 
-    def _show_lock(self) -> None:
-        self._clear_container()
-        self._update_toolbar("lock")
-        self._lock_view = lock_view.LockView(self._container, on_unlocked=self._on_unlocked)
-        self._lock_view.pack(fill="both", expand=True)
-
-    def _on_unlocked(self) -> None:
-        self._show_greeter()
-
-    def _lock(self) -> None:
-        self._stop()
-        security.lock_vault()
-        self._current_session = None
-        self._show_lock()
-
-    def _change_password(self) -> None:
-        lock_view.ChangePasswordDialog(self.root)
-
     def _show_greeter(self) -> None:
-        if not security.is_unlocked():
-            self._show_lock()
-            return
         self._clear_container()
-        self._update_toolbar("greeter")
         self._greeter = greeter.Greeter(
             self._container,
             on_chat=self._show_chat,
@@ -137,10 +100,9 @@ class MainWindow:
         self._greeter.set_status(self._status_text())
 
     def _show_chat(self) -> None:
-        if not security.is_unlocked():
-            self._show_lock()
+        if not self.model:
+            messagebox.showinfo("Please wait", "Models are still being prepared (or Ollama is unavailable).")
             return
-        self._update_toolbar("chat")
         self._build_chat_view()
         self._open_current_session()
         self._apply_chat_header()
@@ -163,6 +125,7 @@ class MainWindow:
         assert self._sessions is not None
         self._sessions.reload()
         self._activate_picked_session()
+
 
     def _activate_picked_session(self) -> None:
         session_id: str | None = self._pick_active_session_id()
@@ -228,18 +191,12 @@ class MainWindow:
         return "Ollama not running"
 
     def _clear_container(self) -> None:
-        if self._container is None:
-            return
         for child in self._container.winfo_children():
             child.destroy()
         self._greeter = None
         self._chat = None
-        self._sessions = None
-        self._lock_view = None
 
     def _on_quit(self) -> None:
-        self._stop()
-        security.lock_vault()
         server.stop(proc=self._ollama_proc)
         self.root.destroy()
 
@@ -283,6 +240,7 @@ class MainWindow:
     def _stop(self) -> None:
         if self._stop_event is not None:
             self._stop_event.set()
+
 
     def _emit(self, token: str) -> None:
         self._response_buffer.append(token)
@@ -373,6 +331,11 @@ class MainWindow:
         for msg in session.messages:
             self._chat.append_user(msg["content"]) if msg["role"] == "user" else self._chat.append_system(msg["content"])
 
+    
+    def _set_greeter_status(self, text: str) -> None:
+        if self._greeter is not None:
+            self._greeter.set_status(text)
+            
     def _pick_active_session_id(self) -> str | None:
         assert self._sessions is not None
         metas: list[SessionMeta] = self._sessions.metas()
@@ -402,3 +365,8 @@ class MainWindow:
         )
         if isinstance(result, Error):
             print(f"[session] failed to persist modes: {result}")
+            
+    def _models_ready(self, err) -> None:
+        self._detect()
+        if self._greeter is not None:
+            self._greeter.set_status(str(err) if err else self._status_text())
