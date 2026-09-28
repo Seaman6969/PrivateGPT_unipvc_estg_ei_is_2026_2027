@@ -65,12 +65,8 @@ def has_model(port: int, model: str) -> bool | Error:
     return any(_matches_helper(name=name, target=model) for name in names)
 
 
-def pull(
-    port: int,
-    model: str,
-    on_status: StringCallback | None = None,
-) -> Error | None:
-    payload: dict[str, Any] = {"name": model, "stream": True}
+def pull(port, model, on_status=None):
+    payload = {"model": model, "name": model, "stream": True}
     return _stream_pull_helper(port=port, payload=payload, on_status=on_status)
 
 
@@ -228,12 +224,17 @@ def _consume_pull_stream_helper(
         _consume_pull(response=response, on_status=on_status)
 
 
-def _consume_pull(
-    response: requests.Response,
-    on_status: StringCallback | None,
-) -> None:
+def _consume_pull(response, on_status):
     seen: set[str] = set()
     for line in response.iter_lines():
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if data.get("error"):
+            raise requests.RequestException(data["error"])
         _handle_status_line_helper(line=line, seen=seen, on_status=on_status)
 
 

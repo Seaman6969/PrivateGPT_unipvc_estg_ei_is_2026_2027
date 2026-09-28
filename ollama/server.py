@@ -4,6 +4,7 @@ import os
 import signal
 import subprocess
 import time
+import shutil
 
 from . import ports
 
@@ -39,16 +40,6 @@ def wait_until_ready(port: int, timeout: float = DEFAULT_READY_TIMEOUT_SECONDS) 
     return _poll_until_ready_helper(port=port, deadline=deadline)
 
 
-def _spawn_server_helper(port: int) -> subprocess.Popen:
-    return subprocess.Popen(
-        list(OLLAMA_SERVE_ARGS),
-        env=_server_env_helper(port=port),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-
 def _signal_terminate_helper(proc: subprocess.Popen) -> None:
     try:
         os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
@@ -70,12 +61,6 @@ def _signal_kill_helper(proc: subprocess.Popen) -> None:
         pass
 
 
-def _server_env_helper(port: int) -> dict[str, str]:
-    environment: dict[str, str] = dict(os.environ)
-    environment[OLLAMA_HOST_ENV] = OLLAMA_HOST_TEMPLATE.format(port=port)
-    return environment
-
-
 def _poll_until_ready_helper(port: int, deadline: float) -> bool:
     if time.time() >= deadline:
         return False
@@ -83,3 +68,32 @@ def _poll_until_ready_helper(port: int, deadline: float) -> bool:
         return True
     time.sleep(READY_POLL_INTERVAL_SECONDS)
     return _poll_until_ready_helper(port=port, deadline=deadline)
+
+def _ollama_cmd() -> list[str]:
+    appdir = os.environ.get("APPDIR")
+    if appdir:
+        bundled = os.path.join(appdir, "usr", "bin", "ollama")
+        if os.path.exists(bundled):
+            return [bundled, "serve"]
+    found = shutil.which("ollama")
+    return [found, "serve"] if found else list(OLLAMA_SERVE_ARGS)
+
+def _spawn_server_helper(port):
+    return subprocess.Popen(
+        _ollama_cmd(), env=_server_env_helper(port=port),
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+def _server_env_helper(port):
+    environment = dict(os.environ)
+    environment[OLLAMA_HOST_ENV] = OLLAMA_HOST_TEMPLATE.format(port=port)
+    appdir = environment.get("APPDIR")
+    if appdir and "LD_LIBRARY_PATH" in environment:
+        kept = [p for p in environment["LD_LIBRARY_PATH"].split(":")
+                if p and not p.startswith(appdir)]
+        if kept:
+            environment["LD_LIBRARY_PATH"] = ":".join(kept)
+        else:
+            environment.pop("LD_LIBRARY_PATH")
+    return environment
