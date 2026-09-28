@@ -11,7 +11,7 @@ from utils.errors import Error
 
 from .chunker import Chunk
 
-CHROMA_DIR: Path = Path.home() / ".privategpt" / "rag" / "chroma"
+CHROMA_DIR: Path = Path.home() / ".localgpt" / "rag" / "chroma"
 COLLECTION_NAME: str = "knowledge"
 EMBED_MODEL: str = "nomic-embed-text"
 OLLAMA_URL: str = "http://127.0.0.1:11434"
@@ -88,6 +88,7 @@ class OllamaEmbeddingFunction(EmbeddingFunction[Documents]):
 class VectorStore:
     def __init__(self, port: int | None = None, url: str | None = None) -> None:
         self._client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        CHROMA_DIR.mkdir(parents=True, exist_ok=True)
         self._embed = OllamaEmbeddingFunction(url=url, model_name=EMBED_MODEL, port=port)
 
     def set_port(self, port: int | None) -> None:
@@ -176,7 +177,6 @@ def _query_safe_helper(collection: chromadb.Collection, text: str, top_k: int) -
             exact_matches: list[dict[str, Any]] = []
             seen_texts: set[str] = set()
 
-            # Exact keyword / identifier boost (e.g. PN XF557549)
             candidates = _extract_identifiers(text)
             for code in candidates:
                 try:
