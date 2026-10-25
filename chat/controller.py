@@ -25,7 +25,8 @@ SYSTEM_PROMPT: str = (
     "2. If reference material is available, cite or reference the relevant source or session when helpful.\n"
     "3. Maintain conversation continuity and remember context across turns.\n"
     "4. If the requested information is not in the reference material or conversation history, state what is known "
-    "and reason based on general knowledge without inventing facts."
+    "and reason based on general knowledge without inventing facts.\n"
+    "5. Keep it simple and speak in portuguese."
 )
 
 def ensure_models(port: int, on_status=None) -> Error | None:
@@ -109,20 +110,22 @@ def send(
     stop_event=None,
     history: list[dict[str, str]] | None = None,
 ) -> None:
+    tokenless: bool = "tokenless" in modes
+    effective_history: list[dict[str, str]] = [] if tokenless else (history or [])
+
     augmented: str = _augment_helper(prompt=prompt, attachments=attachments, modes=modes)
-    search_query = _contextual_query_helper(prompt=prompt, history=history)
+    search_query = _contextual_query_helper(prompt=prompt, history=effective_history)
     chunks = retrieve(search_query, port=port)
     context = format_context(chunks)
     if context:
         augmented = f"{context}\n\n{augmented}"
 
     messages: list[client.ChatMessage] = [{"role": "system", "content": SYSTEM_PROMPT}]
-    if history:
-        for msg in history:
-            role = msg.get("role")
-            content = msg.get("content")
-            if role in ("user", "assistant") and content:
-                messages.append({"role": role, "content": content})
+    for msg in effective_history:
+        role = msg.get("role")
+        content = msg.get("content")
+        if role in ("user", "assistant") and content:
+            messages.append({"role": role, "content": content})
 
     messages.append({"role": "user", "content": augmented})
 
@@ -134,7 +137,6 @@ def send(
         stop_event=stop_event,
     )
     on_done(result)
-
 
 def _augment_helper(
     prompt: str,
