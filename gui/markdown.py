@@ -6,6 +6,9 @@ ULIST = re.compile(r"^[-*]\s+(.*)$")
 OLIST = re.compile(r"^(\d+)\.\s+(.*)$")
 QUOTE = re.compile(r"^>\s?(.*)$")
 
+TABLE_ROW = re.compile(r"^\s*\|(.+)\|\s*$")
+TABLE_SEP = re.compile(r"^\s*\|[\s\-\|:]+\|\s*$")
+
 INLINE = (
     ("bold", re.compile(r"\*\*([^*]+)\*\*")),
     ("italic", re.compile(r"(?<!\*)\*([^*]+)\*(?!\*)")),
@@ -22,7 +25,11 @@ def _styles(palette):
     return {
         "bold": {"font": palette["bold"]},
         "italic": {"font": palette["italic"]},
-        "code": {"font": palette["mono"], "background": palette["code_bg"]},
+        "code": {
+            "font": palette["mono"], 
+            "background": palette["code_bg"],
+            "wrap": "none" 
+        },
         "heading": {"font": palette["heading"]},
         "quote": {"lmargin1": 16, "lmargin2": 16, "font": palette["italic"]},
         "bullet": {"lmargin1": 16, "lmargin2": 32},
@@ -33,13 +40,63 @@ def render(widget, raw, base_tag):
     widget.config(state="normal")
     widget.delete("1.0", "end")
     _walk(widget, raw.split("\n"), base_tag)
-    widget.config(state="disabled")
 
 
 def _walk(widget, lines, base_tag):
     in_fence = False
+    table_buf = [] 
+    
     for line in lines:
-        in_fence = _step(widget, line, base_tag, in_fence)
+        if in_fence:
+            in_fence = _step(widget, line, base_tag, in_fence)
+            continue
+            
+        if FENCE.match(line):
+            if table_buf:
+                _emit_table(widget, table_buf, base_tag)
+                table_buf = []
+            in_fence = _step(widget, line, base_tag, in_fence)
+            continue
+            
+        if TABLE_ROW.match(line):
+            table_buf.append(line)
+            continue
+            
+        if table_buf:
+            _emit_table(widget, table_buf, base_tag)
+            table_buf = []
+            
+        _emit_regular(widget, line, base_tag)
+        
+    if table_buf:
+        _emit_table(widget, table_buf, base_tag)
+
+
+def _emit_table(widget, table_lines, base_tag):
+    rows = []
+    for line in table_lines:
+        if TABLE_SEP.match(line):
+            continue  
+        parts = [c.strip() for c in line.strip().strip("|").split("|")]
+        rows.append(parts)
+
+    if not rows:
+        return
+    
+    num_cols = max(len(r) for r in rows)
+    widths = [0] * num_cols
+    for r in rows:
+        for i, c in enumerate(r):
+            widths[i] = max(widths[i], len(c))
+
+    # Emit aligned rows
+    for r in rows:
+        padded = []
+        for i in range(num_cols):
+            cell = r[i] if i < len(r) else ""
+            padded.append(cell.ljust(widths[i]))
+        line = "| " + " | ".join(padded) + " |"
+        _emit_code(widget, line, base_tag)
 
 
 def _step(widget, line, base_tag, in_fence):

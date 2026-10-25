@@ -2,6 +2,10 @@ import tkinter as tk
 
 from chat import modes as m
 from config import sessions
+from config.reasoning_settings import (
+    load_reasoning_settings,
+    save_reasoning_settings,
+)
 from utils.errors import Error
 
 from . import attachments_bar, chat_bubble, widgets
@@ -24,6 +28,7 @@ class ChatPanel(tk.Frame):
         self.on_tokenless_requested = on_tokenless_requested
         self.on_stop = on_stop
         self._mode_vars: dict[str, tk.BooleanVar] = {}
+        self._reasoning_vars: dict[str, tk.BooleanVar] = {}
         self._build()
 
 
@@ -109,6 +114,7 @@ class ChatPanel(tk.Frame):
         self._build_attach_row(container)
         self._build_input_row(container)
         self._build_modes_row(container)
+        self._build_reasoning_row(container)
 
     def _make_input_container(self) -> tk.Frame:
         container = widgets.make_frame(self, bg=widgets.WHITE)
@@ -165,14 +171,49 @@ class ChatPanel(tk.Frame):
         for name in m.ALL:
             self._add_mode_checkbox(row, name)
 
+    def _build_reasoning_row(self, parent) -> None:
+        row = widgets.make_frame(parent, bg=widgets.WHITE)
+        row.pack(fill="x", pady=(6, 0))
+        widgets.make_label(
+            row, "Retrieval:",
+            font=widgets.FONT_SMALL, fg=widgets.GRAY_MUTED, bg=widgets.WHITE,
+        ).pack(side="left", padx=(6, 6))
+        settings = load_reasoning_settings()
+        self._add_reasoning_checkbox(row, "Chain of Thought", "use_cot", settings.use_cot)
+        self._add_reasoning_checkbox(row, "Tree of Thought", "use_tot", settings.use_tot)
+
+    def _add_reasoning_checkbox(self, parent, label: str, key: str, initial: bool) -> None:
+        var = tk.BooleanVar(value=initial)
+        self._reasoning_vars[key] = var
+        box = widgets.make_checkbox(
+            parent, label, var, lambda k=key: self._on_reasoning_toggle(k),
+        )
+        box.pack(side="left", padx=(0, 14))
+
+    def _on_reasoning_toggle(self, _key: str) -> None:
+        settings = load_reasoning_settings()
+        settings.use_cot = self._reasoning_vars["use_cot"].get()
+        settings.use_tot = self._reasoning_vars["use_tot"].get()
+        result = save_reasoning_settings(settings)
+        if isinstance(result, Error):
+            print(f"[reasoning] failed to persist settings: {result}")
+
+    def reload_reasoning_settings(self) -> None:
+        settings = load_reasoning_settings()
+        if "use_cot" in self._reasoning_vars:
+            self._reasoning_vars["use_cot"].set(settings.use_cot)
+        if "use_tot" in self._reasoning_vars:
+            self._reasoning_vars["use_tot"].set(settings.use_tot)
+
     def _on_toggle(self, name: str) -> None:
-        if not self.get_modes():          
-            self._mode_vars[name].set(True)
         if self.on_modes_changed is not None:
             self.on_modes_changed(self.get_modes())
 
     def get_modes(self) -> set[str]:
         return {n for n, v in self._mode_vars.items() if v.get()}
+
+    def get_reasoning(self) -> dict[str, bool]:
+        return {k: v.get() for k, v in self._reasoning_vars.items()}
 
     def get_attachments(self) -> list[tuple[str, str]]:
         return self._attachments.get_files()
